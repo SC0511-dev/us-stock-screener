@@ -104,68 +104,75 @@ F 分与 Altman Z 值按学术阈值分色，**数据缺失显示为 `–` 而�
 
 ## 快速开始
 
-### 1. 安装
+### 一行命令安装（推荐）
 
-需要 Python 3.10 或更高版本。
+在终端粘贴这一行回车，之后跟着提示走即可：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SC0511-dev/us-stock-screener/main/install.sh | bash
+```
+
+脚本会自动完成：检查 Python → 下载项目 → 建立独立环境安装依赖 →
+启动向导引导你填邮箱、选股票范围、采集数据，**结束时自动打开选股报告**。
+全程约 5~10 分钟，只需要回答两三个问题。
+
+> 全部数据存在你本机，程序不会上传任何信息。
+> 邮箱只用于向 SEC 声明联系方式（这是它们对自动化访问的硬性要求）。
+
+装完之后，随时重跑向导即可更新数据并重新生成报告：
+
+```bash
+cd ~/us-stock-screener && .venv/bin/python scripts/quickstart.py
+```
+
+### 手动安装
+
+想自己控制每一步的话：
 
 ```bash
 git clone https://github.com/SC0511-dev/us-stock-screener.git
 cd us-stock-screener
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+cp config/settings.example.json config/settings.json   # 填入你的邮箱
 ```
 
 核心依赖只有 pandas / numpy / lxml / certifi，**全是纯 Python 轮子，不需要编译**。
 
-K 线形态识别额外需要 TA-Lib（它依赖一个 C 库，所以单独安装）：
+然后依次采集：
+
+```bash
+.venv/bin/python scripts/fetch_universe.py            # 股票池
+.venv/bin/python scripts/fetch_prices.py              # 日线行情
+.venv/bin/python scripts/fetch_fundamentals.py        # SEC 财报
+.venv/bin/python scripts/fetch_profile.py             # 市值 / 行业 / 目标价
+.venv/bin/python scripts/fetch_short.py               # FINRA 做空
+.venv/bin/python scripts/fetch_events.py              # 财报日历
+.venv/bin/python scripts/fetch_options.py             # 期权情绪
+.venv/bin/python scripts/fetch_13f.py                 # 机构持仓（首次较慢）
+.venv/bin/python scripts/status.py                    # 数据体检
+```
+
+### K 线形态识别（可选）
+
+形态识别额外需要 TA-Lib，它依赖一个 C 库，所以单独安装：
 
 ```bash
 brew install ta-lib                                    # macOS
 .venv/bin/pip install -r requirements-patterns.txt
 ```
 
-> **不装也能用**。未安装 TA-Lib 时，61 种形态识别与依赖形态的策略不可用，
-> 其余技术指标、基本面、机构持仓、期权、做空等全部功能均不受影响，
-> 程序会正常运行并在相关条件返回空结果时明确提示原因。
+> **不装也能用**。未安装时 61 种形态识别与依赖形态的策略不可用，
+> 其余技术指标、基本面、机构持仓、期权、做空等功能均不受影响。
 
-### 2. 配置
+### 系统要求
 
-```bash
-cp config/settings.example.json config/settings.json
-```
-
-把 `sec_user_agent` 改成你自己的邮箱——**SEC 要求自动化访问声明真实联系方式**，
-格式为 `程序名/版本 (你的邮箱)`。不填写可能被限速甚至封禁 IP。
-
-> 如果你所在的网络对 HTTPS 做中间人解密（部分企业网络会这样做），
-> 请求可能报 `CERTIFICATE_VERIFY_FAILED`。此时可在配置里打开
-> `corporate_ca_fix` 并填入网关证书关键词。**默认关闭**，一般用户无需理会。
-
-### 3. 采集数据
-
-```bash
-# 股票池：默认主要指数成分股（约 520 只）
-.venv/bin/python scripts/fetch_universe.py
-
-# 也可以用自选股票池（示例：100 只热门股，分 6 个主题）
-.venv/bin/python scripts/fetch_universe.py --watchlist config/watchlist_100.json
-
-.venv/bin/python scripts/fetch_prices.py          # 日线行情（并发采集）
-.venv/bin/python scripts/fetch_fundamentals.py    # SEC 财报
-.venv/bin/python scripts/fetch_profile.py         # 市值 / 行业 / 分析师目标价
-.venv/bin/python scripts/fetch_short.py           # FINRA 做空数据
-.venv/bin/python scripts/fetch_events.py          # 财报日历
-.venv/bin/python scripts/fetch_options.py         # 期权情绪
-.venv/bin/python scripts/fetch_13f.py             # 机构持仓（首次含 CUSIP 映射，约 10 分钟）
-```
-
-体检一下数据是否齐全：
-
-```bash
-.venv/bin/python scripts/status.py
-```
-
----
+| 项目 | 要求 |
+| --- | --- |
+| Python | 3.10 或更高（macOS 可执行 `xcode-select --install` 获取） |
+| 系统 | macOS / Linux / Windows |
+| 磁盘 | 约 200 MB（含依赖与缓存） |
+| 网络 | 能访问 sec.gov、nasdaq.com、finra.org、cboe.com |
 
 ## 使用方式
 
