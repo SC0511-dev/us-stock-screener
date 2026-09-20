@@ -1,0 +1,10 @@
+{
+  "sec_user_agent": "ustock-screener/0.1 (your-email@example.com)",
+  "default_scope": "index",
+  "default_years": 3,
+  "benchmark": "SPY",
+  "min_dollar_volume": 5000000,
+
+  "corporate_ca_fix": false,
+  "corporate_ca_keywords": []
+}

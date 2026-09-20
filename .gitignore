@@ -1,0 +1,31 @@
+# 数据与缓存（体积大，不入库）
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+
+# 输出
+*.csv
+!references/*.csv
+
+# 本地配置（含个人邮箱与所在网络环境设置），请复制 settings.example.json 使用
+config/settings.json
+
+# 生成的报告（可随时用 scripts/report.py --html 重新生成）
+report*.html
+!images/screenshot-*.png
+
+# 本地历史备份（不发布）
+.git.bak/
