@@ -36,8 +36,10 @@ def build_panel(prices: pd.DataFrame, bench: pd.DataFrame,
         return ind
     if with_patterns:
         pat = patterns.scan_all(prices)
-        pcols = [c for c in pat.columns if c in patterns.PATTERNS]
-        ind = ind.merge(pat[["symbol", "date"] + pcols], on=["symbol", "date"], how="left")
+        if not pat.empty:
+            pcols = [c for c in pat.columns if c in patterns.PATTERNS]
+            ind = ind.merge(pat[["symbol", "date"] + pcols],
+                            on=["symbol", "date"], how="left")
     ind = indicators.add_relative_strength(ind, bench)
 
     g = ind.groupby("symbol", sort=False)

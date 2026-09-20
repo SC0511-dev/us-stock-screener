@@ -1,0 +1,14 @@
+# K 线形态识别（可选）
+#
+# TA-Lib 依赖一个 C 库，必须先装底层库再装 Python 包：
+#
+#   macOS          brew install ta-lib
+#   Ubuntu/Debian  sudo apt install ta-lib      （或源码编译）
+#   Windows        下载对应的预编译 wheel 安装
+#
+# 然后：
+#   pip install -r requirements-patterns.txt
+#
+# 不安装也能正常使用，只是 61 种 K 线形态识别与依赖形态的策略不可用，
+# 其余技术指标、基本面、机构持仓、期权等全部功能均不受影响。
+TA-Lib>=0.4.28

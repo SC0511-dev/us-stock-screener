@@ -155,8 +155,18 @@ def main():
 
     if out.empty:
         print("没有股票满足全部条件。")
-        print("这通常不是程序出错，而是当前市场环境下确实没有符合条件的标的——"
-              "可尝试放宽条件或改用 --mode or。")
+        # 若用到了形态类条件但本机没有 TA-Lib，空结果的真实原因是缺少依赖，
+        # 此时必须说清楚，否则会被误解成「市场上没有符合条件的股票」。
+        used = (strategies.STRATEGIES[args.strategy].conditions if args.strategy
+                else [c.strip() for c in args.conditions.split(",")])
+        from ustock import patterns as _pat
+        if not _pat.HAS_TALIB and any(c.startswith("pat_") for c in used):
+            print("注意：本次用到了 K 线形态条件，但当前环境未安装 TA-Lib，")
+            print("      形态识别不可用，因此这些条件恒为假。")
+            print("      安装方法见 requirements-patterns.txt。")
+        else:
+            print("这通常不是程序出错，而是当前市场环境下确实没有符合条件的标的——"
+                  "可尝试放宽条件或改用 --mode or。")
         return
 
     cols = [c for c in SHOW if c in out.columns]

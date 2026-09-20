@@ -98,9 +98,13 @@ def cn_name(fn: str) -> str:
 
 
 def scan(df: pd.DataFrame, only: list[str] | None = None) -> pd.DataFrame:
-    """对单只股票识别全部形态，在原表上追加以形态函数名命名的列。"""
+    """对单只股票识别全部形态，在原表上追加以形态函数名命名的列。
+
+    未安装 TA-Lib 时返回原表（不追加形态列），而不是抛异常——
+    形态识别是可选能力，不应该让整条选股流程失败。
+    """
     if not HAS_TALIB:
-        raise RuntimeError("形态识别需要 TA-Lib，请先安装：pip install TA-Lib")
+        return df.copy()
     d = df.copy().reset_index(drop=True)
     o, h, l, c = (np.ascontiguousarray(d[x].astype("float64").to_numpy())
                   for x in ("open", "high", "low", "close"))
@@ -113,7 +117,9 @@ def scan(df: pd.DataFrame, only: list[str] | None = None) -> pd.DataFrame:
 
 
 def scan_all(prices: pd.DataFrame, only: list[str] | None = None) -> pd.DataFrame:
-    """批量识别多只股票的形态。"""
+    """批量识别多只股票的形态。未安装 TA-Lib 时返回空表。"""
+    if not HAS_TALIB:
+        return pd.DataFrame()
     out = []
     for _, g in prices.groupby("symbol", sort=False):
         g = g.sort_values("date")

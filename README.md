@@ -106,16 +106,27 @@ F 分与 Altman Z 值按学术阈值分色，**数据缺失显示为 `–` 而�
 
 ### 1. 安装
 
-```bash
-git clone <仓库地址> && cd us-stock-screener
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-```
-
-K 线形态识别需要 TA-Lib（可选，不装则形态功能不可用，其余正常）：
+需要 Python 3.10 或更高版本。
 
 ```bash
-brew install ta-lib && .venv/bin/pip install TA-Lib
+git clone https://github.com/SC0511-dev/us-stock-screener.git
+cd us-stock-screener
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
+
+核心依赖只有 pandas / numpy / lxml / certifi，**全是纯 Python 轮子，不需要编译**。
+
+K 线形态识别额外需要 TA-Lib（它依赖一个 C 库，所以单独安装）：
+
+```bash
+brew install ta-lib                                    # macOS
+.venv/bin/pip install -r requirements-patterns.txt
+```
+
+> **不装也能用**。未安装 TA-Lib 时，61 种形态识别与依赖形态的策略不可用，
+> 其余技术指标、基本面、机构持仓、期权、做空等全部功能均不受影响，
+> 程序会正常运行并在相关条件返回空结果时明确提示原因。
 
 ### 2. 配置
 

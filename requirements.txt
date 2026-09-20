@@ -1,12 +1,9 @@
-# 核心依赖
+# 核心依赖（纯 Python 轮子，pip install 即可，无需编译）
 pandas>=2.0
 numpy>=1.24
-lxml>=4.9          # 解析网页表格（指数成分股）
+lxml>=4.9        # 解析网页表格（指数成分股）
+certifi          # 证书校验
 
-# 可选但强烈建议：K 线形态识别需要它
-# macOS 安装：brew install ta-lib && pip install TA-Lib
-# 未安装时形态识别不可用，其余功能正常
-TA-Lib>=0.4.28
-
-# 证书校验；在对 HTTPS 做中间人解密的网络环境下可按需开启证书兼容（默认关闭）
-certifi
+# K 线形态识别需要 TA-Lib，它依赖一个 C 库，必须单独安装。
+# 故意不写在这里：若放进本文件，未装 C 库的用户会连 pandas 都装不上。
+# 安装方法见 requirements-patterns.txt。

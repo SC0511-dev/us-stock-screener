@@ -218,8 +218,11 @@ def build_snapshot(prices: pd.DataFrame, bench: pd.DataFrame | None = None,
         return ind
     if with_patterns:
         pat = patterns.scan_all(prices)
-        pcols = [c for c in pat.columns if c in patterns.PATTERNS]
-        ind = ind.merge(pat[["symbol", "date"] + pcols], on=["symbol", "date"], how="left")
+        # 未安装 TA-Lib 时形态表为空，此时跳过合并，形态类条件自动恒为假
+        if not pat.empty:
+            pcols = [c for c in pat.columns if c in patterns.PATTERNS]
+            ind = ind.merge(pat[["symbol", "date"] + pcols],
+                            on=["symbol", "date"], how="left")
     if bench is not None and not bench.empty:
         ind = indicators.add_relative_strength(ind, bench)
 
