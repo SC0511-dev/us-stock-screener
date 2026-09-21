@@ -56,7 +56,19 @@ def main():
         print("当日数据已齐全。")
         return
     print(f"采集 {len(syms)} 只股票的期权聚合指标（并发 {args.workers}）…")
-    t0, rows, done, miss = time.time(), [], 0, 0
+    t0, rows, done, miss, written = time.time(), [], 0, 0, 0
+    buf: list[dict] = []
+
+    def flush_buf() -> int:
+        """分批落库：CBOE 源单只要等三秒多，整批跑完可能十几分钟，
+        攒到最后再写一次意味着中途中断就前功尽弃。"""
+        nonlocal buf
+        if not buf:
+            return 0
+        k = store.upsert(pd.DataFrame(buf), "options_agg")
+        rows.extend(buf)
+        buf = []
+        return k
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futs = {pool.submit(op.fetch_summary, s, 21600,
@@ -67,22 +79,25 @@ def main():
                 d = fu.result()
                 if d:
                     d["date"] = today
-                    rows.append(d)
+                    buf.append(d)
                 else:
                     miss += 1
             except Exception:
                 miss += 1
-            if done % 100 == 0 or done == len(syms):
+            if len(buf) >= 25:
+                written += flush_buf()
+            if done % 25 == 0 or done == len(syms):
                 el = time.time() - t0
-                print(f"  进度 {done}/{len(syms)}  无期权 {miss}  "
+                print(f"  进度 {done}/{len(syms)}  无期权 {miss}  已入库 {written}  "
                       f"用时 {el:.0f}s  预计剩余 {el / done * (len(syms) - done):.0f}s",
                       flush=True)
+    written += flush_buf()
 
     if not rows:
         print("未获取到数据")
         return
     df = pd.DataFrame(rows)
-    n = store.upsert(df, "options_agg")
+    n = written
     store.set_meta("options_last_fetch", time.strftime("%Y-%m-%d %H:%M:%S"))
     print(f"\n✅ 写入 {n:,} 条，用时 {time.time() - t0:.0f}s")
     print(f"   无期权的股票 {miss} 只（小盘股常见，属正常）")
