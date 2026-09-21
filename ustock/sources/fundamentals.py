@@ -76,17 +76,17 @@ FRAME_URL = "https://data.sec.gov/api/xbrl/frames/{tax}/{tag}/{unit}/{period}.js
 def recent_periods(n_quarters: int = 9, as_of: dt.date | None = None) -> list[str]:
     """生成最近 n 个季度的报告期标签，例如 CY2026Q2。
 
-    SEC 通常在季度结束后一两个月才有较完整数据，这里默认从上上个季度开始回溯，
-    避免大量请求落在尚无数据的最新季度上。
+    从**当前季度**开始往回取，而不是预先回退几个季度。
+    公司在季度结束后约四到八周才陆续申报，最新一两个季度确实可能数据稀疏，
+    但请求一个空的 frame 成本极低（几十毫秒），而预先回退的代价是
+    整整少掉一个季度的财报——所有滚动十二个月指标都会因此偏旧，
+    对盈利快速变化的公司误差极大。
+
+    数据是否足够由后续的连续性校验判断，不在这里预判。
     """
     d = as_of or dt.date.today()
     q = (d.month - 1) // 3 + 1
     y = d.year
-    # 回退两个季度作为起点
-    for _ in range(2):
-        q -= 1
-        if q == 0:
-            q, y = 4, y - 1
     out = []
     for _ in range(n_quarters):
         out.append(f"CY{y}Q{q}")

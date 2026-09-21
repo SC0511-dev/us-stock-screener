@@ -48,13 +48,40 @@ def fundamental_snapshot(symbols: list[str] | None = None) -> pd.DataFrame:
     if f.empty:
         return pd.DataFrame()
 
-    # 按报告期倒序编号：0 为最近一期
-    f = f.sort_values(["symbol", "tag", "form", "end_date"],
-                      ascending=[True, True, True, False])
-    f["rk"] = f.groupby(["symbol", "tag", "form"]).cumcount()
+    f["end_dt"] = pd.to_datetime(f["end_date"], errors="coerce")
+    q_all = f[f["form"] == "FRAME_Q"].copy()
+    a_all = f[f["form"] == "FRAME_A"].copy()
 
-    q = f[f["form"] == "FRAME_Q"]
-    a = f[f["form"] == "FRAME_A"]
+    # ── 用年报倒推缺失的第四季度 ──
+    # 公司在 10-K 里披露全年，不单独披露第四季度，因此 SEC 的季度数据天然缺 Q4。
+    # 若直接取「最近四行」求和，加到的会是不连续的四个季度
+    # （中间漏掉一个季度、还跨了财年），滚动十二个月因此严重失真。
+    # 这里用「全年 − 已有的三个季度」把缺失的那一季补出来。
+    if not a_all.empty and not q_all.empty:
+        m = a_all.merge(q_all, on=["symbol", "tag"], suffixes=("_a", "_q"))
+        gap = (m["end_dt_a"] - m["end_dt_q"]).dt.days
+        m = m[gap.between(0, 370)]          # 只保留落在该财年内的季度
+        g = m.groupby(["symbol", "tag", "end_dt_a"], as_index=False).agg(
+            n=("value_q", "size"), s=("value_q", "sum"),
+            ann=("value_a", "first"))
+        g = g[g["n"] == 3]                  # 恰好缺一个季度时才推导
+        if not g.empty:
+            derived = pd.DataFrame({
+                "symbol": g["symbol"], "tag": g["tag"],
+                "end_dt": g["end_dt_a"],
+                "end_date": g["end_dt_a"].dt.strftime("%Y-%m-%d"),
+                "value": g["ann"] - g["s"], "form": "FRAME_Q_DERIVED",
+            })
+            q_all = pd.concat([q_all, derived], ignore_index=True)
+
+    q_all = q_all.drop_duplicates(["symbol", "tag", "end_date"], keep="first")
+    q_all = q_all.sort_values(["symbol", "tag", "end_dt"], ascending=[True, True, False])
+    q_all["rk"] = q_all.groupby(["symbol", "tag"]).cumcount()
+
+    a_all = a_all.sort_values(["symbol", "tag", "end_dt"], ascending=[True, True, False])
+    a_all["rk"] = a_all.groupby(["symbol", "tag"]).cumcount()
+
+    q, a = q_all, a_all
 
     def _pivot(df, agg="sum"):
         if df.empty:
@@ -62,24 +89,33 @@ def fundamental_snapshot(symbols: list[str] | None = None) -> pd.DataFrame:
         return df.pivot_table(index="symbol", columns="tag",
                               values="value", aggfunc=agg)
 
-    # 滚动十二个月：最近四个季度之和，且必须刚好凑满四期
-    q4 = q[q["rk"] < 4]
-    cnt4 = q4.pivot_table(index="symbol", columns="tag", values="value",
-                          aggfunc="count")
-    ttm = _pivot(q4).where(cnt4 >= 4)
-    # 去年同期滚动十二个月：第 5~8 个季度
-    q8 = q[(q["rk"] >= 4) & (q["rk"] < 8)]
-    cnt8 = q8.pivot_table(index="symbol", columns="tag", values="value",
-                          aggfunc="count")
-    ttm_py = _pivot(q8).where(cnt8 >= 4)
+    def _ttm_window(lo: int, hi: int) -> pd.DataFrame:
+        """取排名 [lo, hi) 的四个季度求和，并校验它们确实连续覆盖十二个月。
 
-    # 年度值作为季度不足时的回退（现金流量表在 10-Q 中多按年初至今累计披露）
+        校验很有必要：即便补齐了第四季度，仍可能因个别季度缺报而出现空档。
+        跨度明显偏离一年时宁可返回空，也不要给出一个错误的滚动十二个月值。
+        """
+        w = q[(q["rk"] >= lo) & (q["rk"] < hi)]
+        if w.empty:
+            return pd.DataFrame()
+        stat = w.groupby(["symbol", "tag"]).agg(
+            n=("value", "size"), s=("value", "sum"),
+            lo_dt=("end_dt", "min"), hi_dt=("end_dt", "max"))
+        span = (stat["hi_dt"] - stat["lo_dt"]).dt.days
+        # 四个连续季度的首尾间隔约 270 天（三个季度的跨度），放宽到 240~300
+        good = stat[(stat["n"] == 4) & span.between(240, 300)]
+        if good.empty:
+            return pd.DataFrame()
+        return good.reset_index().pivot(index="symbol", columns="tag", values="s")
+
+    ttm = _ttm_window(0, 4)
+    ttm_py = _ttm_window(4, 8)
+
     ann = _pivot(a[a["rk"] == 0], "first")
     ann_py = _pivot(a[a["rk"] == 1], "first")
 
-    # 时点指标取最近一期与四个季度前
-    inst = _pivot(q[q["rk"] == 0], "first")
-    inst_py = _pivot(q[q["rk"] == 4], "first")
+    inst = _pivot(q[(q["rk"] == 0) & (q["form"] == "FRAME_Q")], "first")
+    inst_py = _pivot(q[(q["rk"] == 4) & (q["form"] == "FRAME_Q")], "first")
 
     idx = f["symbol"].drop_duplicates().sort_values()
     d = pd.DataFrame({"symbol": idx}).set_index("symbol")
@@ -96,9 +132,9 @@ def fundamental_snapshot(symbols: list[str] | None = None) -> pd.DataFrame:
         d[m] = col(inst, m)
         d[f"{m}_py"] = col(inst_py, m)
 
-    # 同比增速：最近一期与四期之前比较；基数为负时增速无经济意义，置空
+    # 同比增速用滚动十二个月对比，比单季对比更稳定，也避开季节性影响
     for m in ("revenue", "net_income"):
-        cur, prev = col(_pivot(q[q["rk"] == 0], "first"), m), col(inst_py, m)
+        cur, prev = d[f"{m}_ttm"], d[f"{m}_ttm_py"]
         prev = prev.where(prev > 0)
         d[f"{m}_yoy"] = cur / prev - 1
 
