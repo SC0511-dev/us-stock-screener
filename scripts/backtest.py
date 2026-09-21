@@ -25,6 +25,9 @@ def main():
     ap.add_argument("--every", type=int, default=21, help="检验间隔交易日，默认 21")
     ap.add_argument("--top", type=int, default=20, help="每次取前 N 只")
     ap.add_argument("--csv", help="导出逐次结果")
+    ap.add_argument("--with-fundamentals", action="store_true",
+                    help="把当前的财报/做空/期权/机构因子接到历史每一天（有严重前视偏差，"
+                         "仅供粗略观察，收益数字不具预测意义）")
     args = ap.parse_args()
 
     if not args.strategy and not args.conditions:
@@ -46,6 +49,29 @@ def main():
     if panel.empty:
         print("面板为空")
         return
+
+    conds = (strategies.STRATEGIES[args.strategy].conditions if args.strategy
+             else [c.strip() for c in args.conditions.split(",")])
+    unsupported = backtest.unsupported_conditions(conds)
+
+    if unsupported and args.with_fundamentals:
+        print("\n把当前的财报/做空/期权/机构因子接入面板…")
+        panel = backtest.attach_current_factors(panel)
+        print("⚠️  这些因子用的是「今天」的值，相当于拿未来信息判断过去。")
+        print("    结果只能用于粗略观察方向，收益数字不具备预测意义。")
+    elif unsupported:
+        print("\n" + "─" * 60)
+        print("⚠️  本策略含有回测面板无法提供的条件，它们会恒为假：")
+        for k, cat in unsupported:
+            print(f"      {k:24s}（{cat}）")
+        print()
+        print("    原因：回测面板由历史行情推导，只覆盖价格与量能类因子。")
+        print("    财报、机构持仓、期权、做空这些数据只有「当前值」，")
+        print("    没有「当时可得的值」，直接接到历史日期上会造成前视偏差。")
+        print()
+        print("    若只想粗略观察方向，可加 --with-fundamentals 强制接入，")
+        print("    但要清楚那样得到的收益数字不具备预测意义。")
+        print("─" * 60)
 
     if args.strategy:
         res = backtest.run_strategy(args.strategy, panel, bench, args.every, args.top)

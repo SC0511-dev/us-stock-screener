@@ -24,6 +24,57 @@ from . import indicators, patterns, screen, strategies
 
 HORIZONS = (5, 20, 60)
 
+# 回测面板由行情推导，因此只覆盖价格与量能类因子。
+# 其余因子（财报、机构持仓、期权、做空、事件）只有「当前值」，
+# 没有「当时可得的值」，把它们接到历史日期上会产生严重的前视偏差。
+PANEL_CATEGORIES = {
+    "趋势均线", "动量摆荡", "波动通道", "量能", "价格位置",
+    "流动性", "K线形态", "相对强弱",
+}
+EXTERNAL_CATEGORIES = {
+    "基本面", "估值", "财务评分", "市值", "市场结构",
+    "期权情绪", "机构持仓", "事件驱动", "分析师预期", "政要持仓", "指数归属",
+}
+
+
+def unsupported_conditions(conditions: list[str]) -> list[tuple[str, str]]:
+    """找出回测面板无法提供数据的条件，返回 [(条件key, 所属分类)]。
+
+    这些条件在回测里会恒为假，若不提示，使用者会误以为
+    「这个策略历史上从未触发」，而真实原因是数据不在面板里。
+    """
+    out = []
+    for k in conditions:
+        c = screen.CONDITIONS.get(k)
+        if c and c.category in EXTERNAL_CATEGORIES:
+            out.append((k, c.category))
+    return out
+
+
+def attach_current_factors(panel: pd.DataFrame) -> pd.DataFrame:
+    """把「当前」的财报、做空、期权、机构持仓因子接到面板的每一行上。
+
+    ⚠️ 这会引入严重的前视偏差：用今天才知道的财务数据去判断一年前该不该买。
+    仅用于粗略观察因子方向，**得到的收益数字不具备任何预测意义**。
+    调用方必须向使用者明确说明这一点。
+    """
+    from . import factors
+    extra = []
+    fund = factors.fundamental_snapshot()
+    if not fund.empty:
+        px = panel.sort_values("date").groupby("symbol", as_index=False).tail(1)
+        fund = factors.add_scores(factors.add_valuation(fund, px[["symbol", "close"]]))
+        extra.append(fund)
+    for f in (factors.short_snapshot(), factors.options_snapshot(),
+              factors.inst_snapshot()):
+        if f is not None and not f.empty:
+            extra.append(f)
+    out = panel
+    for e in extra:
+        dup = [c for c in e.columns if c in out.columns and c != "symbol"]
+        out = out.merge(e.drop(columns=dup), on="symbol", how="left")
+    return out
+
 
 def build_panel(prices: pd.DataFrame, bench: pd.DataFrame,
                 with_patterns: bool = True) -> pd.DataFrame:
