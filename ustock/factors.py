@@ -66,11 +66,19 @@ def fundamental_snapshot(symbols: list[str] | None = None) -> pd.DataFrame:
             ann=("value_a", "first"))
         g = g[g["n"] == 3]                  # 恰好缺一个季度时才推导
         if not g.empty:
+            g = g.assign(q4=g["ann"] - g["s"])
+            # 合理性检查：SEC 的年度数据偶有异常（个别公司整年数值为零或量级明显不符），
+            # 直接相减会得到一个荒谬的第四季度并污染后续全部估值指标。
+            # 这里要求推导出的季度与前三季度的规模大致可比，否则宁可不推导。
+            scale = (g["s"] / 3).abs()
+            plausible = (g["q4"].abs() <= scale * 6) & (g["ann"].abs() >= scale)
+            g = g[plausible]
+        if not g.empty:
             derived = pd.DataFrame({
                 "symbol": g["symbol"], "tag": g["tag"],
                 "end_dt": g["end_dt_a"],
                 "end_date": g["end_dt_a"].dt.strftime("%Y-%m-%d"),
-                "value": g["ann"] - g["s"], "form": "FRAME_Q_DERIVED",
+                "value": g["q4"], "form": "FRAME_Q_DERIVED",
             })
             q_all = pd.concat([q_all, derived], ignore_index=True)
 
@@ -98,12 +106,20 @@ def fundamental_snapshot(symbols: list[str] | None = None) -> pd.DataFrame:
         w = q[(q["rk"] >= lo) & (q["rk"] < hi)]
         if w.empty:
             return pd.DataFrame()
+        # 逐个相邻季度的间隔都要接近一个季度。
+        # 只看首尾跨度是不够的：财年不与日历年对齐的公司（例如财年七月结束），
+        # 在 SEC 的日历季度归类下会出现「两期挤在一起、中间空一档」的情况，
+        # 首尾跨度看着正常，实际却漏掉了一个季度。
+        w = w.sort_values(["symbol", "tag", "end_dt"])
+        w = w.assign(gap=w.groupby(["symbol", "tag"])["end_dt"].diff().dt.days)
         stat = w.groupby(["symbol", "tag"]).agg(
             n=("value", "size"), s=("value", "sum"),
+            gap_min=("gap", "min"), gap_max=("gap", "max"),
             lo_dt=("end_dt", "min"), hi_dt=("end_dt", "max"))
         span = (stat["hi_dt"] - stat["lo_dt"]).dt.days
-        # 四个连续季度的首尾间隔约 270 天（三个季度的跨度），放宽到 240~300
-        good = stat[(stat["n"] == 4) & span.between(240, 300)]
+        good = stat[(stat["n"] == 4) & span.between(240, 300)
+                    & stat["gap_min"].between(75, 110)
+                    & stat["gap_max"].between(75, 110)]
         if good.empty:
             return pd.DataFrame()
         return good.reset_index().pivot(index="symbol", columns="tag", values="s")
@@ -124,10 +140,31 @@ def fundamental_snapshot(symbols: list[str] | None = None) -> pd.DataFrame:
         return df[tag].reindex(d.index) if (not df.empty and tag in df) \
             else pd.Series(np.nan, index=d.index)
 
+    # 季度数据不足时回退到年度值，但要先确认这个年度值本身可信：
+    # 若它明显小于同期单季度的规模，说明该条年度记录有问题（实测确有此类情况），
+    # 用它回退只会把错误传播到市盈率、利润率等所有派生指标上。
+    qmax = q.groupby(["symbol", "tag"])["value"].max().abs().unstack(fill_value=np.nan) \
+        if not q.empty else pd.DataFrame()
+
+    def _ann_trusted(metric: str) -> pd.Series:
+        a_val = col(ann, metric)
+        if qmax.empty or metric not in qmax.columns:
+            return a_val
+        mx = qmax[metric].reindex(d.index)
+        return a_val.where(a_val.abs() >= mx * 0.9)
+
     for m in DURATION:
-        v = col(ttm, m)
-        d[f"{m}_ttm"] = v.fillna(col(ann, m))          # 季度不足时用年度回退
+        q4 = col(ttm, m)
+        d[f"{m}_ttm"] = q4.fillna(_ann_trusted(m))
         d[f"{m}_ttm_py"] = col(ttm_py, m).fillna(col(ann_py, m))
+
+    # 标记营收与净利的口径来源：
+    # ttm 表示由四个连续季度求和得出；fy 表示季度数据不连续（财年与日历年不对齐、
+    # 或个别季度缺报），退而使用上一个完整财年的数字——它是真实披露值，
+    # 但反映的是财年区间而非最近十二个月，判断估值时要意识到这个时间差。
+    for m in ("revenue", "net_income"):
+        d[f"{m}_basis"] = np.where(col(ttm, m).notna(), "ttm",
+                                   np.where(d[f"{m}_ttm"].notna(), "fy", ""))
     for m in INSTANT:
         d[m] = col(inst, m)
         d[f"{m}_py"] = col(inst_py, m)
