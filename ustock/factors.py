@@ -245,10 +245,25 @@ def inst_snapshot() -> pd.DataFrame:
                              "holders": "inst_holders"})
 
 
-def options_snapshot() -> pd.DataFrame:
-    """期权情绪因子：取每只股票最近一次的聚合指标。"""
-    d = store.query("SELECT * FROM options_agg WHERE date=(SELECT MAX(date) FROM options_agg)")
-    return d.drop(columns=["date"]) if not d.empty else pd.DataFrame()
+def options_snapshot(days: int = 7) -> pd.DataFrame:
+    """期权情绪因子：逐字段取最近一次的有效值。
+
+    不能简单地「只取最新日期那一批」。期权数据有两个来源：
+    CBOE 提供隐含波动率与希腊字母但限流严格，Nasdaq 稳定可批量但没有波动率。
+    若某天用 Nasdaq 补采了一遍，最新日期这批的隐含波动率全是空值，
+    会让前一天从 CBOE 取到的有效数据凭空消失。
+
+    因此这里在最近若干天的窗口内，对每个字段分别取最后一个非空值。
+    """
+    d = store.query(
+        "SELECT * FROM options_agg WHERE date >= date('now', ?) ORDER BY date",
+        (f"-{days} days",))
+    if d.empty:
+        return pd.DataFrame()
+    # groupby().last() 默认跳过空值，正好实现「逐字段取最近有效值」
+    out = d.drop(columns=[c for c in ("date", "source") if c in d.columns]) \
+           .groupby("symbol", as_index=False).last()
+    return out
 
 
 def politician_snapshot(days: int = 90) -> pd.DataFrame:

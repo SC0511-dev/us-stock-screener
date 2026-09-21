@@ -21,6 +21,8 @@ def main():
                     help="index=指数成分股，all=全美股，custom=自定义代码")
     ap.add_argument("--symbols", help="scope=custom 时的代码，逗号分隔")
     ap.add_argument("--watchlist", help="自选股票池 JSON 文件，例如 config/watchlist_100.json")
+    ap.add_argument("--keep-existing", action="store_true",
+                    help="保留股票池中已有但不在本次范围内的股票（默认会清理）")
     ap.add_argument("--sec-ua", default=None,
                     help="SEC 要求的 User-Agent，格式：程序名 (你的邮箱)")
     args = ap.parse_args()
@@ -52,6 +54,20 @@ def main():
     for c in ("in_sp500", "in_ndx", "in_dow"):
         if c in u.columns:
             u[c] = u[c].astype(int)
+
+    # 「构建股票池」的语义是重建而不是追加：
+    # 切换范围或换用另一份自选池时，必须把不再属于本次范围的股票清掉，
+    # 否则旧池子的残留会混进后续所有筛选结果里。
+    if not args.keep_existing:
+        with store.conn() as c:
+            old = {r[0] for r in c.execute("SELECT symbol FROM universe")}
+            drop = old - set(u["symbol"])
+            if drop:
+                c.executemany("DELETE FROM universe WHERE symbol=?",
+                              [(s,) for s in drop])
+                print(f"  已移出 {len(drop)} 只不在本次范围内的股票"
+                      f"（行情等历史数据保留，不会重复采集）")
+
     n = store.upsert(u, "universe")
     store.set_meta("universe_scope", args.watchlist or args.scope)
 
